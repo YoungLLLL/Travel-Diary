@@ -67,8 +67,14 @@
         <div class="header-top">
           <button class="btn-back" @click="router.push('/')">← 返回</button>
           <button class="btn-bill" @click="router.push({ name: 'trip-bill', params: { id } })">💰 账单</button>
+          <button class="btn-bill" @click="router.push({ name: 'trip-export', params: { id } })">🖨️ 打印</button>
         </div>
-        <h1 class="trip-title">{{ trip.name }}</h1>
+        <input
+          class="trip-title-input"
+          :value="trip.name"
+          @blur="e => { if (e.target.value.trim()) store.updateTrip(id, { name: e.target.value.trim() }) }"
+          @keyup.enter="e => e.target.blur()"
+        />
         <p class="trip-meta">{{ trip.startDate }} ~ {{ trip.endDate }} · {{ trip.days.length }} 天</p>
       </div>
 
@@ -177,7 +183,15 @@
                   {{ getTimePeriodLabel(spot.time) }}
                 </div>
                 <div class="spot-name-row">
-                  <span class="spot-name">{{ spot.name || '未命名景点' }}</span>
+                  <span v-if="activeSpotId !== spot.id" class="spot-name">{{ spot.name || '未命名景点' }}</span>
+                  <input
+                    v-else
+                    class="spot-name-input"
+                    :value="spot.name"
+                    @blur="e => { if (e.target.value.trim()) { spot.name = e.target.value.trim(); saveTrip() } }"
+                    @keyup.enter="e => e.target.blur()"
+                    @click.stop
+                  />
                   <span v-if="spot.tag && activeSpotId !== spot.id" :class="['spot-tag-badge', `tag-${spot.tag}`]">{{ tagLabel(spot.tag) }}</span>
                   <select
                     v-if="activeSpotId === spot.id"
@@ -1578,11 +1592,25 @@ onUnmounted(() => {
   background: #dbeafe;
 }
 
-.trip-title {
+.trip-title-input {
   font-size: 20px;
   font-weight: 700;
   color: #1a1a1a;
   margin: 0 0 2px;
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+}
+.trip-title-input:hover {
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+.trip-title-input:focus {
+  background: #f0f4ff;
+  border-radius: 4px;
 }
 
 .trip-meta {
@@ -1935,6 +1963,20 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.spot-name-input {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: #f0f4ff;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: inherit;
 }
 
 /* Spot tag */

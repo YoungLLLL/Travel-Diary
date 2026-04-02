@@ -2,7 +2,15 @@
   <div class="home">
     <header class="home-header">
       <h1>Travel Diary</h1>
-      <button class="btn-primary" @click="showCreateModal = true">+ 新建旅行计划</button>
+      <div class="header-actions">
+        <label class="btn-secondary btn-icon-action" title="导入数据">
+          导入
+          <input type="file" accept=".json" hidden @change="importData" />
+        </label>
+        <button class="btn-secondary btn-icon-action" @click="exportData" title="导出数据">导出</button>
+        <button class="btn-secondary btn-icon-action" @click="logout">退出</button>
+        <button class="btn-primary" @click="showCreateModal = true">+ 新建</button>
+      </div>
     </header>
 
     <div v-if="trips.length === 0" class="empty-state">
@@ -51,11 +59,18 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTripsStore } from '../stores/trips'
+import { useAuthStore } from '../stores/auth'
 import { storeToRefs } from 'pinia'
 
 const router = useRouter()
 const store = useTripsStore()
+const auth = useAuthStore()
 const { trips } = storeToRefs(store)
+
+async function logout() {
+  await auth.signOut()
+  router.push('/login')
+}
 
 const showCreateModal = ref(false)
 const form = ref({ name: '', startDate: '', endDate: '' })
@@ -77,6 +92,36 @@ function deleteTrip(id) {
     store.deleteTrip(id)
   }
 }
+
+function exportData() {
+  const json = JSON.stringify(trips.value, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `travel-diary-backup-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function importData(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result)
+      if (!Array.isArray(data)) throw new Error('格式错误')
+      if (confirm(`导入将覆盖当前所有数据（共 ${data.length} 条行程），确认继续吗？`)) {
+        store.importTrips(data)
+      }
+    } catch {
+      alert('文件格式有误，请选择正确的备份文件')
+    }
+  }
+  reader.readAsText(file)
+  e.target.value = ''
+}
 </script>
 
 <style scoped>
@@ -91,6 +136,19 @@ function deleteTrip(id) {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 32px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-icon-action {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
 }
 
 .home-header h1 {

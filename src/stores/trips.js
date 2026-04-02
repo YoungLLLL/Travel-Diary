@@ -1,50 +1,83 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { supabase } from '../lib/supabase'
 
 export const useTripsStore = defineStore('trips', () => {
-  const trips = ref(JSON.parse(localStorage.getItem('trips') || '[]'))
+  const trips = ref([])
+  const syncing = ref(false)
 
-  // 兼容旧数据：transport 从字符串迁移为对象
-  migrateTransport()
-  migrateDayNotes()
+  // =====================
+  // 从 Supabase 加载所有行程
+  // =====================
+  async function fetchTrips() {
+    const { data, error } = await supabase
+      .from('trips')
+      .select('id, data')
+      .order('data->startDate', { ascending: true })
+    if (error) { console.error('fetchTrips:', error); return }
 
+    const remoteTrips = data.map(row => ({ ...row.data, id: row.id }))
+
+    // 一次性迁移：云端为空 && 本地 localStorage 有数据
+    if (remoteTrips.length === 0) {
+      const local = JSON.parse(localStorage.getItem('trips') || '[]')
+      if (local.length > 0) {
+        await importTrips(local)
+        localStorage.removeItem('trips')
+        return
+      }
+    }
+
+    trips.value = remoteTrips
+    migrateTransport()
+    migrateDayNotes()
+  }
+
+  // =====================
+  // 把单条行程同步到 Supabase
+  // =====================
+  async function syncTrip(trip) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { error } = await supabase
+      .from('trips')
+      .upsert({ id: trip.id, user_id: user.id, data: trip, updated_at: new Date().toISOString() })
+    if (error) console.error('syncTrip:', error)
+  }
+
+  function getTrip(id) {
+    return trips.value.find(t => t.id === id)
+  }
+
+  // =====================
+  // 数据迁移（兼容旧格式）
+  // =====================
   function migrateTransport() {
-    let changed = false
     for (const trip of trips.value) {
       for (const day of trip.days) {
         for (const spot of day.spots) {
           if (typeof spot.transport === 'string') {
             spot.transport = { mode: spot.transport, detail: '', cost: null }
-            changed = true
-          } else if (spot.transport === null || spot.transport === undefined) {
+          } else if (!spot.transport) {
             spot.transport = { mode: null, detail: '', cost: null }
-            changed = true
           }
         }
       }
     }
-    if (changed) save()
   }
 
-  // 兼容旧数据：添加 day.notes
   function migrateDayNotes() {
-    let changed = false
     for (const trip of trips.value) {
       for (const day of trip.days) {
-        if (!day.notes) {
-          day.notes = []
-          changed = true
-        }
+        if (!day.notes) day.notes = []
       }
     }
-    if (changed) save()
   }
 
-  function save() {
-    localStorage.setItem('trips', JSON.stringify(trips.value))
-  }
-
-  function createTrip(name, startDate, endDate) {
+  // =====================
+  // 行程 CRUD
+  // =====================
+  async function createTrip(name, startDate, endDate) {
     const trip = {
       id: Date.now().toString(),
       name,
@@ -54,8 +87,21 @@ export const useTripsStore = defineStore('trips', () => {
       days: generateDays(startDate, endDate),
     }
     trips.value.push(trip)
-    save()
+    await syncTrip(trip)
     return trip.id
+  }
+
+  async function deleteTrip(id) {
+    trips.value = trips.value.filter(t => t.id !== id)
+    const { error } = await supabase.from('trips').delete().eq('id', id)
+    if (error) console.error('deleteTrip:', error)
+  }
+
+  async function updateTrip(id, updates) {
+    const trip = getTrip(id)
+    if (!trip) return
+    Object.assign(trip, updates)
+    await syncTrip(trip)
   }
 
   function generateDays(startDate, endDate) {
@@ -64,7 +110,6 @@ export const useTripsStore = defineStore('trips', () => {
     const end = new Date(endDate)
     let current = new Date(start)
     let index = 1
-
     while (current <= end) {
       days.push({
         id: `day-${index}`,
@@ -72,6 +117,7 @@ export const useTripsStore = defineStore('trips', () => {
         date: current.toISOString().split('T')[0],
         theme: '',
         spots: [],
+        notes: [],
       })
       current.setDate(current.getDate() + 1)
       index++
@@ -79,111 +125,87 @@ export const useTripsStore = defineStore('trips', () => {
     return days
   }
 
-  function deleteTrip(id) {
-    trips.value = trips.value.filter(t => t.id !== id)
-    save()
-  }
-
-  function getTrip(id) {
-    return trips.value.find(t => t.id === id)
-  }
-
-  function updateTrip(id, updates) {
-    const trip = getTrip(id)
-    if (trip) {
-      Object.assign(trip, updates)
-      save()
-    }
-  }
-
+  // =====================
   // Checklist
-  function addChecklistItem(tripId, text) {
+  // =====================
+  async function addChecklistItem(tripId, text) {
     const trip = getTrip(tripId)
-    if (trip) {
-      trip.checklist.push({ id: Date.now().toString(), text, done: false })
-      save()
-    }
+    if (!trip) return
+    trip.checklist.push({ id: Date.now().toString(), text, done: false })
+    await syncTrip(trip)
   }
 
-  function toggleChecklistItem(tripId, itemId) {
+  async function toggleChecklistItem(tripId, itemId) {
     const trip = getTrip(tripId)
-    if (trip) {
-      const item = trip.checklist.find(i => i.id === itemId)
-      if (item) item.done = !item.done
-      save()
-    }
+    if (!trip) return
+    const item = trip.checklist.find(i => i.id === itemId)
+    if (item) item.done = !item.done
+    await syncTrip(trip)
   }
 
-  function deleteChecklistItem(tripId, itemId) {
+  async function deleteChecklistItem(tripId, itemId) {
     const trip = getTrip(tripId)
-    if (trip) {
-      trip.checklist = trip.checklist.filter(i => i.id !== itemId)
-      save()
-    }
+    if (!trip) return
+    trip.checklist = trip.checklist.filter(i => i.id !== itemId)
+    await syncTrip(trip)
   }
 
+  // =====================
   // Spots
-  function addSpot(tripId, dayId, spot) {
-    const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day) {
-        day.spots.push({
-          id: Date.now().toString(),
-          name: spot.name || '',
-          time: spot.time || '',
-          address: spot.address || '',
-          lat: spot.lat || null,
-          lng: spot.lng || null,
-          placeId: spot.placeId || null,
-          tag: '',
-          notes: '',
-          photos: [],
-          expenses: [],
-          transport: { mode: null, detail: '', cost: null },
-        })
-        save()
-      }
-    }
-  }
-
-  function updateSpot(tripId, dayId, spotId, updates) {
-    const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day) {
-        const spot = day.spots.find(s => s.id === spotId)
-        if (spot) {
-          Object.assign(spot, updates)
-          save()
-        }
-      }
-    }
-  }
-
-  function deleteSpot(tripId, dayId, spotId) {
-    const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day) {
-        day.spots = day.spots.filter(s => s.id !== spotId)
-        save()
-      }
-    }
-  }
-
-  function reorderSpots(tripId, dayId, fromIndex, toIndex) {
+  // =====================
+  async function addSpot(tripId, dayId, spot) {
     const trip = getTrip(tripId)
     if (!trip) return
     const day = trip.days.find(d => d.id === dayId)
     if (!day) return
-    const spots = day.spots
-    const [moved] = spots.splice(fromIndex, 1)
-    spots.splice(toIndex, 0, moved)
-    save()
+    day.spots.push({
+      id: Date.now().toString(),
+      name: spot.name || '',
+      time: spot.time || '',
+      address: spot.address || '',
+      lat: spot.lat || null,
+      lng: spot.lng || null,
+      placeId: spot.placeId || null,
+      tag: '',
+      notes: '',
+      photos: [],
+      expenses: [],
+      transport: { mode: null, detail: '', cost: null },
+    })
+    await syncTrip(trip)
   }
 
-  function moveSpot(tripId, fromDayId, fromIndex, toDayId, toIndex) {
+  async function updateSpot(tripId, dayId, spotId, updates) {
+    const trip = getTrip(tripId)
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day) return
+    const spot = day.spots.find(s => s.id === spotId)
+    if (!spot) return
+    Object.assign(spot, updates)
+    await syncTrip(trip)
+  }
+
+  async function deleteSpot(tripId, dayId, spotId) {
+    const trip = getTrip(tripId)
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day) return
+    day.spots = day.spots.filter(s => s.id !== spotId)
+    await syncTrip(trip)
+  }
+
+  async function reorderSpots(tripId, dayId, fromIndex, toIndex) {
+    const trip = getTrip(tripId)
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day) return
+    const [moved] = day.spots.splice(fromIndex, 1)
+    day.spots.splice(toIndex, 0, moved)
+    await syncTrip(trip)
+  }
+
+  async function moveSpot(tripId, fromDayId, fromIndex, toDayId, toIndex) {
     const trip = getTrip(tripId)
     if (!trip) return
     const fromDay = trip.days.find(d => d.id === fromDayId)
@@ -191,125 +213,121 @@ export const useTripsStore = defineStore('trips', () => {
     if (!fromDay || !toDay) return
     const [moved] = fromDay.spots.splice(fromIndex, 1)
     toDay.spots.splice(toIndex, 0, moved)
-    save()
+    await syncTrip(trip)
   }
 
+  // =====================
   // Expenses
-  function addExpense(tripId, dayId, spotId, expense) {
+  // =====================
+  async function addExpense(tripId, dayId, spotId, expense) {
     const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day) {
-        const spot = day.spots.find(s => s.id === spotId)
-        if (spot) {
-          spot.expenses.push({
-            id: Date.now().toString(),
-            amount: expense.amount,
-            category: expense.category,
-            note: expense.note || '',
-          })
-          save()
-        }
-      }
-    }
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day) return
+    const spot = day.spots.find(s => s.id === spotId)
+    if (!spot) return
+    spot.expenses.push({
+      id: Date.now().toString(),
+      amount: expense.amount,
+      category: expense.category,
+      note: expense.note || '',
+    })
+    await syncTrip(trip)
   }
 
-  function deleteExpense(tripId, dayId, spotId, expenseId) {
+  async function deleteExpense(tripId, dayId, spotId, expenseId) {
     const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day) {
-        const spot = day.spots.find(s => s.id === spotId)
-        if (spot) {
-          spot.expenses = spot.expenses.filter(e => e.id !== expenseId)
-          save()
-        }
-      }
-    }
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day) return
+    const spot = day.spots.find(s => s.id === spotId)
+    if (!spot) return
+    spot.expenses = spot.expenses.filter(e => e.id !== expenseId)
+    await syncTrip(trip)
   }
 
-  // Bill summary — 包含景点花费 + 交通花费
+  // =====================
+  // Bill summary
+  // =====================
   function getTripBill(tripId) {
     const trip = getTrip(tripId)
     if (!trip) return null
-
     const categories = {}
     const dayTotals = []
     let total = 0
-
     for (const day of trip.days) {
       let dayTotal = 0
       const dayExpenses = []
-
       for (const spot of day.spots) {
-        // 景点花费
         for (const expense of spot.expenses) {
           const amount = Number(expense.amount) || 0
-          total += amount
-          dayTotal += amount
+          total += amount; dayTotal += amount
           categories[expense.category] = (categories[expense.category] || 0) + amount
           dayExpenses.push({ spotName: spot.name, ...expense })
         }
-        // 交通花费
         const tc = Number(spot.transport?.cost) || 0
         if (tc > 0) {
-          total += tc
-          dayTotal += tc
+          total += tc; dayTotal += tc
           categories['交通'] = (categories['交通'] || 0) + tc
-          dayExpenses.push({
-            id: `transport-${spot.id}`,
-            spotName: spot.transport?.detail || '交通',
-            amount: tc,
-            category: '交通',
-            note: spot.name + ' →',
-          })
+          dayExpenses.push({ id: `transport-${spot.id}`, spotName: spot.transport?.detail || '交通', amount: tc, category: '交通', note: spot.name + ' →' })
         }
       }
-
       dayTotals.push({ day, total: dayTotal, expenses: dayExpenses })
     }
-
     return { total, categories, dayTotals }
   }
 
+  // =====================
   // Day notes
-  function addDayNote(tripId, dayId, text) {
+  // =====================
+  async function addDayNote(tripId, dayId, text) {
     const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day) {
-        if (!day.notes) day.notes = []
-        day.notes.push({ id: Date.now().toString(), text, done: false })
-        save()
-      }
-    }
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day) return
+    if (!day.notes) day.notes = []
+    day.notes.push({ id: Date.now().toString(), text, done: false })
+    await syncTrip(trip)
   }
 
-  function toggleDayNote(tripId, dayId, noteId) {
+  async function toggleDayNote(tripId, dayId, noteId) {
     const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day && day.notes) {
-        const note = day.notes.find(n => n.id === noteId)
-        if (note) note.done = !note.done
-        save()
-      }
-    }
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day || !day.notes) return
+    const note = day.notes.find(n => n.id === noteId)
+    if (note) note.done = !note.done
+    await syncTrip(trip)
   }
 
-  function deleteDayNote(tripId, dayId, noteId) {
+  async function deleteDayNote(tripId, dayId, noteId) {
     const trip = getTrip(tripId)
-    if (trip) {
-      const day = trip.days.find(d => d.id === dayId)
-      if (day && day.notes) {
-        day.notes = day.notes.filter(n => n.id !== noteId)
-        save()
-      }
+    if (!trip) return
+    const day = trip.days.find(d => d.id === dayId)
+    if (!day || !day.notes) return
+    day.notes = day.notes.filter(n => n.id !== noteId)
+    await syncTrip(trip)
+  }
+
+  // =====================
+  // 导入（覆盖全部数据）
+  // =====================
+  async function importTrips(data) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    // 先删除云端所有行程
+    await supabase.from('trips').delete().eq('user_id', user.id)
+    // 再逐条上传
+    for (const trip of data) {
+      await supabase.from('trips').insert({ id: trip.id, user_id: user.id, data: trip, updated_at: new Date().toISOString() })
     }
+    trips.value = data
   }
 
   return {
     trips,
+    syncing,
+    fetchTrips,
     createTrip,
     deleteTrip,
     getTrip,
@@ -328,5 +346,6 @@ export const useTripsStore = defineStore('trips', () => {
     addDayNote,
     toggleDayNote,
     deleteDayNote,
+    importTrips,
   }
 })
