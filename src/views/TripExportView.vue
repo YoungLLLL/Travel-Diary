@@ -37,7 +37,7 @@
           </h2>
           <table>
             <thead>
-              <tr>
+              <tr :style="{ background: getDayColor(day), color: '#fff' }">
                 <th style="width:48px"></th>
                 <th style="width:60px">时间</th>
                 <th>地点</th>
@@ -155,6 +155,15 @@ function getDayRows(day) {
   return rows
 }
 
+const DAY_COLORS = [
+  '#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6',
+  '#ec4899', '#0891b2', '#854d0e', '#4f46e5', '#059669',
+]
+
+function getDayColor(day) {
+  return day.color || DAY_COLORS[(day.index - 1) % DAY_COLORS.length]
+}
+
 function printPDF() {
   window.print()
 }
@@ -213,19 +222,19 @@ function printPDF() {
 }
 
 .doc-title {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   margin: 0 0 4px;
 }
 
 .doc-dates {
-  font-size: 13px;
+  font-size: 11px;
   color: #555;
   margin: 0 0 36px;
 }
 
 .section-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   margin: 32px 0 8px;
   padding-bottom: 4px;
@@ -237,25 +246,24 @@ table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 4px;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 th, td {
   border: 1px solid #ccc;
-  padding: 7px 10px;
+  padding: 5px 8px;
   text-align: left;
   vertical-align: middle;
 }
 
 th {
-  background: #d0d0d0;
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: 700;
+  font-size: 10px;
 }
 
 .td-period {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 11px;
   text-align: center;
   background: #fafafa;
   width: 48px;
@@ -277,13 +285,22 @@ th {
 @media print {
   .no-print { display: none !important; }
 
-  .export-page { background: #fff; }
+  .export-page {
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 
   .export-doc {
     margin: 0;
     padding: 0;
     box-shadow: none;
     max-width: 100%;
+  }
+
+  th, td {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   table { page-break-inside: avoid; }

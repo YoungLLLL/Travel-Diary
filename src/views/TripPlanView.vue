@@ -7,7 +7,7 @@
 
       <!-- Search bar -->
       <div class="map-search">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon">Q</span>
         <input
           id="map-search-input"
           type="text"
@@ -19,7 +19,7 @@
       <!-- Toolbar -->
       <div class="map-toolbar">
         <button class="btn-map-type" @click="toggleMapType">
-          {{ isSatellite ? '🗺️ 地图' : '🛰️ 卫星' }}
+          {{ isSatellite ? '地图' : '卫星' }}
         </button>
       </div>
 
@@ -66,8 +66,8 @@
       <div class="panel-header">
         <div class="header-top">
           <button class="btn-back" @click="router.push('/')">← 返回</button>
-          <button class="btn-bill" @click="router.push({ name: 'trip-bill', params: { id } })">💰 账单</button>
-          <button class="btn-bill" @click="router.push({ name: 'trip-export', params: { id } })">🖨️ 打印</button>
+          <button class="btn-bill" @click="router.push({ name: 'trip-bill', params: { id } })">账单</button>
+          <button class="btn-bill" @click="router.push({ name: 'trip-export', params: { id } })">打印</button>
         </div>
         <input
           class="trip-title-input"
@@ -105,9 +105,15 @@
 
         <!-- Day header -->
         <div class="day-card-header">
-          <div class="day-number-block">
+          <div class="day-number-block" :style="{ background: getDayColor(day) }">
             <span class="day-word">Day</span>
             <span class="day-num">{{ day.index }}</span>
+            <input
+              type="color"
+              class="day-color-picker"
+              :value="getDayColor(day)"
+              @input="e => updateDayColor(day, e.target.value)"
+            />
           </div>
           <div class="day-info">
             <div class="day-date">{{ formatDate(day.date) }}</div>
@@ -202,11 +208,11 @@
                     @click.stop
                   >
                     <option value="">标签</option>
-                    <option value="sight">🏛 景点</option>
-                    <option value="food">🍜 餐饮</option>
-                    <option value="hotel">🏨 住宿</option>
-                    <option value="shopping">🛍 购物</option>
-                    <option value="activity">🎯 活动</option>
+                    <option value="sight">景点</option>
+                    <option value="food">餐饮</option>
+                    <option value="hotel">住宿</option>
+                    <option value="shopping">购物</option>
+                    <option value="activity">活动</option>
                   </select>
                 </div>
                 <div v-if="spot.notes && activeSpotId !== spot.id" class="spot-notes-preview">{{ spot.notes }}</div>
@@ -227,7 +233,7 @@
                       :class="['spot-action-btn', spotPanel[spot.id] === 'expense' && 'is-active']"
                       @click="toggleSpotPanel(spot.id, 'expense')"
                     >
-                      <span class="action-icon">💰</span>
+                      <span class="action-icon">$</span>
                       <span>记账</span>
                       <span v-if="spot.expenses.length" class="action-badge">{{ spot.expenses.length }}</span>
                     </button>
@@ -235,7 +241,7 @@
                       :class="['spot-action-btn', spotPanel[spot.id] === 'photo' && 'is-active']"
                       @click="toggleSpotPanel(spot.id, 'photo')"
                     >
-                      <span class="action-icon">📷</span>
+                      <span class="action-icon">P</span>
                       <span>拍照</span>
                       <span v-if="spot.photos.length" class="action-badge">{{ spot.photos.length }}</span>
                     </button>
@@ -243,7 +249,7 @@
                       :class="['spot-action-btn', spotPanel[spot.id] === 'note' && 'is-active']"
                       @click="toggleSpotPanel(spot.id, 'note')"
                     >
-                      <span class="action-icon">📝</span>
+                      <span class="action-icon">N</span>
                       <span>笔记</span>
                       <span v-if="spot.notes" class="action-badge-dot"></span>
                     </button>
@@ -300,11 +306,11 @@
                     @change="saveTrip"
                   >
                     <option :value="null">＋ 交通方式</option>
-                    <option value="car">🚗 汽车</option>
-                    <option value="train">🚆 火车</option>
-                    <option value="walk">🚶 步行</option>
-                    <option value="subway">🚇 地铁</option>
-                    <option value="bus">🚌 公交</option>
+                    <option value="car">汽车</option>
+                    <option value="train">火车</option>
+                    <option value="walk">步行</option>
+                    <option value="subway">地铁</option>
+                    <option value="bus">公交</option>
                   </select>
                   <span v-if="routeInfo[spot.id] && !routeInfo[spot.id].error" class="route-info">
                     {{ routeInfo[spot.id].distance }} · {{ routeInfo[spot.id].duration }}
@@ -445,7 +451,9 @@ const expenseModal = ref({
 let map = null
 let markers = []
 let routeRenderers = []
+let labelOverlays = []
 let tempMarker = null
+let SpotLabelOverlay = null
 
 // =====================
 // Helpers
@@ -491,7 +499,7 @@ function getSpotDayIndex(spotIdx) {
   return spotIdx + 1
 }
 
-const TAG_LABELS = { sight: '🏛 景点', food: '🍜 餐饮', hotel: '🏨 住宿', shopping: '🛍 购物', activity: '🎯 活动' }
+const TAG_LABELS = { sight: '景点', food: '餐饮', hotel: '住宿', shopping: '购物', activity: '活动' }
 function tagLabel(tag) {
   return TAG_LABELS[tag] || ''
 }
@@ -503,6 +511,17 @@ function tagLabel(tag) {
 function saveTrip() {
   store.updateTrip(id, {})
 }
+
+function getDayColor(day) {
+  return day.color || DAY_COLORS[(day.index - 1) % DAY_COLORS.length]
+}
+
+function updateDayColor(day, color) {
+  day.color = color
+  saveTrip()
+  renderMarkers()
+}
+
 
 function addChecklistItem() {
   if (!newChecklistItem.value.trim()) return
@@ -713,6 +732,45 @@ const DAY_COLORS = [
 function initMap() {
   if (!window.google) return
 
+  // Google Maps 加载后才能继承 OverlayView
+  if (!SpotLabelOverlay) {
+    SpotLabelOverlay = class extends window.google.maps.OverlayView {
+      constructor(position, text, color) {
+        super()
+        this.position = position
+        this.text = text
+        this.color = color
+        this.div = null
+      }
+      onAdd() {
+        this.div = document.createElement('div')
+        this.div.style.position = 'absolute'
+        this.div.style.fontSize = '11px'
+        this.div.style.fontWeight = 'bold'
+        this.div.style.color = this.color
+        this.div.style.whiteSpace = 'nowrap'
+        this.div.style.pointerEvents = 'none'
+        this.div.style.textShadow = '1px 1px 2px #fff, -1px -1px 2px #fff, 1px -1px 2px #fff, -1px 1px 2px #fff'
+        this.div.textContent = this.text
+        this.getPanes().overlayLayer.appendChild(this.div)
+      }
+      draw() {
+        const projection = this.getProjection()
+        const pos = projection.fromLatLngToDivPixel(this.position)
+        if (this.div) {
+          this.div.style.left = (pos.x + 15) + 'px'
+          this.div.style.top = (pos.y - 28) + 'px'
+        }
+      }
+      onRemove() {
+        if (this.div && this.div.parentNode) {
+          this.div.parentNode.removeChild(this.div)
+          this.div = null
+        }
+      }
+    }
+  }
+
   map = new window.google.maps.Map(document.getElementById('plan-map'), {
     center: { lat: 35.6762, lng: 139.6503 },
     zoom: 12,
@@ -789,8 +847,10 @@ function initSearchBox() {
 function clearMap() {
   markers.forEach(m => m.setMap(null))
   routeRenderers.forEach(r => r.setMap(null))
+  labelOverlays.forEach(l => l.setMap(null))
   markers = []
   routeRenderers = []
+  labelOverlays = []
 }
 
 function renderMarkers() {
@@ -801,7 +861,7 @@ function renderMarkers() {
   let totalSpots = 0
 
   for (const day of trip.value.days) {
-    const color = DAY_COLORS[(day.index - 1) % DAY_COLORS.length]
+    const color = getDayColor(day)
     const daySpots = day.spots.filter(s => s.lat && s.lng)
 
     daySpots.forEach((spot, idx) => {
@@ -810,23 +870,21 @@ function renderMarkers() {
 
       const isActive = activeSpotId.value === spot.id
       const activeColor = darkenColor(color)
+      const fillColor = isActive ? activeColor : color
+      const size = isActive ? 32 : 26
+      const width = isActive ? 26 : 20
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${size}" viewBox="0 0 26 32">
+        <path d="M13 0C5.82 0 0 5.82 0 13c0 9.75 13 19 13 19s13-9.25 13-19C26 5.82 20.18 0 13 0z" fill="${fillColor}" stroke="#fff" stroke-width="1.5"/>
+        <text x="13" y="19" text-anchor="middle" fill="#fff" font-size="16" font-weight="bold" font-family="Arial">${idx + 1}</text>
+      </svg>`
       const marker = new window.google.maps.Marker({
         position: { lat: spot.lat, lng: spot.lng },
         map,
         title: spot.name,
-        label: {
-          text: String(idx + 1),
-          color: '#fff',
-          fontWeight: 'bold',
-          fontSize: '12px',
-        },
         icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: isActive ? 18 : 14,
-          fillColor: isActive ? activeColor : color,
-          fillOpacity: 1,
-          strokeColor: '#fff',
-          strokeWeight: 2,
+          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+          scaledSize: new window.google.maps.Size(width, size),
+          anchor: new window.google.maps.Point(width / 2, size),
         },
         zIndex: isActive ? 100 : totalSpots,
       })
@@ -840,6 +898,17 @@ function renderMarkers() {
       })
 
       markers.push(marker)
+
+      // 在标记旁显示景点名称
+      if (spot.name && SpotLabelOverlay) {
+        const labelOverlay = new SpotLabelOverlay(
+          { lat: spot.lat, lng: spot.lng },
+          spot.name,
+          isActive ? activeColor : color,
+        )
+        labelOverlay.setMap(map)
+        labelOverlays.push(labelOverlay)
+      }
     })
   }
 
@@ -931,7 +1000,7 @@ async function drawRoutes() {
   const newRouteInfo = {}
 
   for (const day of trip.value.days) {
-    const dayColor = DAY_COLORS[(day.index - 1) % DAY_COLORS.length]
+    const dayColor = getDayColor(day)
     const daySpots = day.spots.filter(s => s.lat && s.lng)
     for (let i = 0; i < daySpots.length - 1; i++) {
       // 竞态检查：如果有新的 renderMarkers 调用，停止当前绘制
@@ -1699,7 +1768,6 @@ onUnmounted(() => {
 .day-number-block {
   min-width: 52px;
   height: 52px;
-  background: #2563eb;
   border-radius: 10px;
   display: flex;
   flex-direction: column;
@@ -1707,6 +1775,25 @@ onUnmounted(() => {
   justify-content: center;
   color: #fff;
   flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  transition: opacity 0.15s;
+}
+
+.day-number-block:hover {
+  opacity: 0.85;
+}
+
+.day-color-picker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
 }
 
 .day-word {

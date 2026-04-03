@@ -139,11 +139,11 @@
             <div v-if="idx < day.spots.length - 1" class="transport-connector">
               <select v-model="spot.transport" class="transport-select" @change="saveTrip">
                 <option value="">选择交通方式</option>
-                <option value="subway">🚇 地铁</option>
-                <option value="bus">🚌 巴士</option>
-                <option value="drive">🚗 自驾</option>
-                <option value="walk">🚶 步行</option>
-                <option value="taxi">🚕 出租车</option>
+                <option value="subway">地铁</option>
+                <option value="bus">巴士</option>
+                <option value="drive">自驾</option>
+                <option value="walk">步行</option>
+                <option value="taxi">出租车</option>
                 <option value="other">其他</option>
               </select>
             </div>

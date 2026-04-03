@@ -61,6 +61,8 @@ const selectedSpot = ref(null)
 let map = null
 let markers = []
 let polylines = []
+let labelOverlays = []
+let SpotLabelOverlay = null
 
 // 计算要显示的景点（带地址的）
 const visibleSpots = computed(() => {
@@ -110,11 +112,68 @@ const DAY_COLORS = [
   '#059669', // 翠绿
 ]
 
+// OSRM 免费路由服务（驾车/步行）
+async function fetchOSRMRoute(from, to, googleMode) {
+  const profileMap = { DRIVING: 'car', WALKING: 'foot' }
+  const profile = profileMap[googleMode]
+  if (!profile) return null // TRANSIT 不支持
+
+  const url = `https://router.project-osrm.org/route/v1/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
+  const res = await fetch(url)
+  const data = await res.json()
+
+  if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+    return data.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }))
+  }
+  return null
+}
+
 function initMap() {
   if (!window.google) return
+
+  // Google Maps 加载后才能继承 OverlayView，所以在这里定义
+  if (!SpotLabelOverlay) {
+    SpotLabelOverlay = class extends window.google.maps.OverlayView {
+      constructor(position, text, color) {
+        super()
+        this.position = position
+        this.text = text
+        this.color = color
+        this.div = null
+      }
+      onAdd() {
+        this.div = document.createElement('div')
+        this.div.style.position = 'absolute'
+        this.div.style.fontSize = '12px'
+        this.div.style.fontWeight = 'bold'
+        this.div.style.color = this.color
+        this.div.style.whiteSpace = 'nowrap'
+        this.div.style.pointerEvents = 'none'
+        this.div.style.textShadow = '1px 1px 2px #fff, -1px -1px 2px #fff, 1px -1px 2px #fff, -1px 1px 2px #fff'
+        this.div.textContent = this.text
+        this.getPanes().overlayLayer.appendChild(this.div)
+      }
+      draw() {
+        const projection = this.getProjection()
+        const pos = projection.fromLatLngToDivPixel(this.position)
+        if (this.div) {
+          this.div.style.left = (pos.x + 18) + 'px'
+          this.div.style.top = (pos.y - 36) + 'px'
+        }
+      }
+      onRemove() {
+        if (this.div && this.div.parentNode) {
+          this.div.parentNode.removeChild(this.div)
+          this.div = null
+        }
+      }
+    }
+  }
+
   map = new window.google.maps.Map(document.getElementById('map'), {
     center: { lat: 35.6762, lng: 139.6503 }, // 默认东京
     zoom: 12,
+    clickableIcons: false, // 禁用内置 POI 点击，防止地图视角被意外改变
   })
   renderMapContent()
 }
@@ -122,8 +181,10 @@ function initMap() {
 function clearMap() {
   markers.forEach(m => m.setMap(null))
   polylines.forEach(p => p.setMap(null))
+  labelOverlays.forEach(l => l.setMap(null))
   markers = []
   polylines = []
+  labelOverlays = []
 }
 
 async function renderMapContent() {
@@ -177,6 +238,13 @@ async function renderMapContent() {
       })
 
       markers.push(marker)
+
+      // 在标记旁显示景点名称
+      if (spot.name) {
+        const labelOverlay = new SpotLabelOverlay(pos, spot.name, color)
+        labelOverlay.setMap(map)
+        labelOverlays.push(labelOverlay)
+      }
     })
   }
 
@@ -195,6 +263,9 @@ async function renderMapContent() {
       const to = daySpots[i + 1]
       const mode = TRANSPORT_MODE[from.transport] || 'DRIVING'
 
+      let routeDrawn = false
+
+      // 1. 尝试 Google Directions API
       try {
         const result = await directionsService.route({
           origin: { lat: from.lat, lng: from.lng },
@@ -209,13 +280,45 @@ async function renderMapContent() {
           polylineOptions: { strokeColor: color, strokeWeight: 3, strokeOpacity: 0.8 },
         })
         polylines.push(renderer)
+        routeDrawn = true
       } catch (e) {
+        console.warn(`Google Directions failed (${from.name} → ${to.name}):`, e.message || e)
+      }
+
+      // 2. Google 失败时，用 OSRM 免费路由（支持驾车/步行，不支持公交）
+      if (!routeDrawn) {
+        try {
+          const osrmPath = await fetchOSRMRoute(from, to, mode)
+          if (osrmPath) {
+            const line = new window.google.maps.Polyline({
+              path: osrmPath,
+              geodesic: true,
+              strokeColor: color,
+              strokeOpacity: 0.8,
+              strokeWeight: 3,
+              map,
+            })
+            polylines.push(line)
+            routeDrawn = true
+          }
+        } catch (e) {
+          console.warn(`OSRM route failed (${from.name} → ${to.name}):`, e.message || e)
+        }
+      }
+
+      // 3. 都失败时，画虚线直连
+      if (!routeDrawn) {
         const line = new window.google.maps.Polyline({
           path: [{ lat: from.lat, lng: from.lng }, { lat: to.lat, lng: to.lng }],
           geodesic: true,
           strokeColor: color,
           strokeOpacity: 0.5,
           strokeWeight: 2,
+          icons: [{
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.5, scale: 3 },
+            offset: '0',
+            repeat: '16px',
+          }],
           map,
         })
         polylines.push(line)

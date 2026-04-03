@@ -111,11 +111,16 @@ export const useTripsStore = defineStore('trips', () => {
     let current = new Date(start)
     let index = 1
     while (current <= end) {
+      const defaultColors = [
+        '#2563eb', '#dc2626', '#16a34a', '#f59e0b', '#8b5cf6',
+        '#ec4899', '#0891b2', '#854d0e', '#4f46e5', '#059669',
+      ]
       days.push({
         id: `day-${index}`,
         index,
         date: current.toISOString().split('T')[0],
         theme: '',
+        color: defaultColors[(index - 1) % defaultColors.length],
         spots: [],
         notes: [],
       })
